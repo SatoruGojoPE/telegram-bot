@@ -1,123 +1,173 @@
-import logging
 import os
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, ContextTypes, CommandHandler,
-    MessageHandler, CallbackQueryHandler, filters
+import logging
+from telegram import (
+    Update, 
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup
 )
+from telegram.ext import (
+    ApplicationBuilder, 
+    CommandHandler, 
+    CallbackQueryHandler, 
+    ContextTypes
+)
+from flask import Flask
+import threading
 
-# Setup de logging
+# Configura logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Variables de entorno
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
-GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID")  # ID del grupo de asesores
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Asegúrate de tener esto en tus variables del entorno
+ASESOR_GROUP_CHAT_ID = os.getenv("ASESOR_GROUP_CHAT_ID")  # Debe ser el ID del grupo de asesores
 
-# Diccionario temporal para seguimiento de usuarios
+# Estados de usuarios
 user_states = {}
 
-# Idiomas
-LANGUAGES = {
+# Mensajes por idioma
+messages = {
     "es": {
-        "welcome": "Hola {name}, soy ANFHLYBOT 🤖 tu asistente para activar el plan Premium sin anuncios y acceso exclusivo 🎬. ¿Te interesa?",
-        "confirm_options": ["Sí, quiero", "No, gracias"],
-        "premium_info": "Genial 🎉 Ser usuario Premium te da acceso sin publicidad a películas y series por solo $9 USD/mes vía PayPal. ¿Deseas contactar a un asesor para completar el pago?",
-        "contact_options": ["Contactar asesor", "Cancelar"],
-        "connecting": "⏳ Te estamos conectando con un asesor disponible...",
-        "cancelled": "Has cancelado el proceso. Si deseas volver, escribe /start.",
-        "final": "✅ Proceso finalizado. ¡Gracias por confiar en ANFHLY Premium! ✨"
+        "start": "Hola {name}, soy ANFHLYBOT 🤖, tu asistente para activar tu cuenta *premium* y obtener acceso sin publicidad y contenido exclusivo en la app de ANFHLY.\n\n¿Estás interesado?",
+        "premium_info": "Perfecto 😎. Siendo *premium*, podrás ver tus películas y series favoritas sin interrupciones por solo *9 dólares al mes*. El pago es por *PayPal*.\n\nPara continuar, te pondremos en contacto con un asesor.",
+        "cancelled": "Entendido, puedes escribirme cuando quieras si cambias de opinión.",
+        "contacting": "Estamos contactando a un asesor... por favor espera.",
+        "notify_group": "👤 El usuario @{username} (ID: {id}) está solicitando activar su premium. ¿Alguien disponible?",
+        "connected": "Has sido conectado con un asesor.",
+        "completed": "✅ Venta completada. ¡Gracias por preferirnos! Hasta pronto 👋"
     },
     "en": {
-        "welcome": "Hello {name}, I'm ANFHLYBOT 🤖 your assistant to activate Premium, with ad-free and exclusive access 🎬. Are you interested?",
-        "confirm_options": ["Yes, I'm in", "No, thanks"],
-        "premium_info": "Awesome 🎉 Being Premium gives you ad-free movies and shows for just $9 USD/month via PayPal. Would you like to contact a support agent?",
-        "contact_options": ["Contact agent", "Cancel"],
-        "connecting": "⏳ Connecting you with an available agent...",
-        "cancelled": "You cancelled the process. If you want to try again, type /start.",
-        "final": "✅ Process completed. Thanks for joining ANFHLY Premium! ✨"
+        "start": "Hi {name}, I'm ANFHLYBOT 🤖, your assistant to activate your *premium* account and get ad-free and exclusive content in ANFHLY app.\n\nAre you interested?",
+        "premium_info": "Awesome 😎. With *premium*, you can enjoy all your favorite shows and movies without ads for just *$9/month*. Payment via *PayPal*.\n\nWe'll connect you with an advisor to continue.",
+        "cancelled": "Got it! Let me know if you change your mind.",
+        "contacting": "We’re contacting an advisor for you… please wait.",
+        "notify_group": "👤 User @{username} (ID: {id}) is requesting premium activation. Anyone available?",
+        "connected": "You’ve been connected with an advisor.",
+        "completed": "✅ Sale completed. Thank you! See you soon 👋"
     }
 }
 
-# Inicio
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+# /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("Español 🇪🇸", callback_data=f"lang_es")],
-        [InlineKeyboardButton("English 🇺🇸", callback_data=f"lang_en")]
+        [InlineKeyboardButton("Español 🇪🇸", callback_data='lang_es')],
+        [InlineKeyboardButton("English 🇺🇸", callback_data='lang_en')]
     ]
-    await update.message.reply_text("Choose your language / Elige tu idioma:", reply_markup=InlineKeyboardMarkup(keyboard))
-    user_states[user_id] = {"stage": "language"}
+    await update.message.reply_text("Elige tu idioma / Choose your language:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Botón de idioma, interés, asesor
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Maneja selección de idioma
+async def handle_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
-    data = query.data
     await query.answer()
 
-    if data.startswith("lang_"):
-        lang = data.split("_")[1]
-        user_states[user_id] = {"lang": lang, "stage": "interested"}
-        text = LANGUAGES[lang]["welcome"].format(name=query.from_user.first_name)
-        buttons = LANGUAGES[lang]["confirm_options"]
-        keyboard = [[InlineKeyboardButton(buttons[0], callback_data="interested_yes")],
-                    [InlineKeyboardButton(buttons[1], callback_data="interested_no")]]
-        await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+    lang = query.data.split("_")[1]
+    user_states[query.from_user.id] = {"lang": lang}
 
-    elif data == "interested_yes":
-        lang = user_states[user_id]["lang"]
-        text = LANGUAGES[lang]["premium_info"]
-        buttons = LANGUAGES[lang]["contact_options"]
-        keyboard = [[InlineKeyboardButton(buttons[0], callback_data="contact_agent")],
-                    [InlineKeyboardButton(buttons[1], callback_data="cancel")]]
-        await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+    name = query.from_user.first_name
+    message = messages[lang]["start"].format(name=name)
 
-    elif data == "interested_no" or data == "cancel":
-        lang = user_states[user_id]["lang"]
-        await query.edit_message_text(LANGUAGES[lang]["cancelled"])
+    keyboard = [
+        [InlineKeyboardButton("Sí ✅" if lang == "es" else "Yes ✅", callback_data='yes')],
+        [InlineKeyboardButton("No ❌" if lang == "es" else "No ❌", callback_data='no')]
+    ]
+    await query.edit_message_text(message, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == "contact_agent":
-        lang = user_states[user_id]["lang"]
-        await query.edit_message_text(LANGUAGES[lang]["connecting"])
-        
-        # Notificar al grupo de asesores
-        msg = f"📩 El usuario [{query.from_user.first_name}](tg://user?id={user_id}) está solicitando Premium.\n¿Quién puede atenderlo?"
-        keyboard = [[InlineKeyboardButton("Aceptar solicitud", callback_data=f"accept_{user_id}")]]
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+# Maneja Sí / No
+async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = user_states.get(user_id, {}).get("lang", "es")
 
-    elif data.startswith("accept_"):
-        client_id = int(data.split("_")[1])
-        responder_id = query.from_user.id
+    if query.data == 'yes':
+        user_states[user_id]["step"] = "awaiting_advisor"
+        message = messages[lang]["premium_info"]
+        keyboard = [
+            [InlineKeyboardButton("Contactar Asesor 👤" if lang == "es" else "Contact Advisor 👤", callback_data='contact')],
+            [InlineKeyboardButton("Cancelar ❌" if lang == "es" else "Cancel ❌", callback_data='cancel')]
+        ]
+        await query.edit_message_text(message, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-        # Notificar al asesor y redirigirlo
-        await query.edit_message_text("✅ Has aceptado la solicitud. Redirigiendo al cliente...")
-        await context.bot.send_message(chat_id=client_id, text="🎉 Te estamos conectando con un asesor ahora mismo...")
-        await context.bot.send_message(chat_id=responder_id, text=f"Contacta con el usuario aquí: [Cliente](tg://user?id={client_id})", parse_mode="Markdown")
+    elif query.data == 'no' or query.data == 'cancel':
+        await query.edit_message_text(messages[lang]["cancelled"])
 
-# Mensajes fuera de flujo
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Por favor, usa /start para iniciar el proceso de activación Premium.")
+    elif query.data == 'contact':
+        await query.edit_message_text(messages[lang]["contacting"])
 
-# Flask keep-alive para Render
-app_flask = Flask(__name__)
+        # Enviar mensaje al grupo de asesores
+        username = query.from_user.username or "sin_usuario"
+        chat_id = query.from_user.id
+        text = messages[lang]["notify_group"].format(username=username, id=chat_id)
 
-@app_flask.route('/')
+        keyboard = [
+            [InlineKeyboardButton("Aceptar al usuario", callback_data=f'accept_{chat_id}')]
+        ]
+
+        await context.bot.send_message(chat_id=ASESOR_GROUP_CHAT_ID, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# Acepta desde grupo
+async def accept_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if not query.data.startswith("accept_"):
+        return
+
+    client_id = int(query.data.split("_")[1])
+    lang = user_states.get(client_id, {}).get("lang", "es")
+
+    # Notificar al cliente
+    await context.bot.send_message(chat_id=client_id, text=messages[lang]["connected"])
+
+    # Opción para el asesor de marcar venta finalizada
+    keyboard = [
+        [InlineKeyboardButton("Marcar como finalizado ✅", callback_data=f'done_{client_id}')]
+    ]
+    await query.edit_message_text("Cliente conectado. Cuando finalices la compra, presiona el botón.", reply_markup=InlineKeyboardMarkup(keyboard))
+
+# Finaliza
+async def finalize_sale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if not query.data.startswith("done_"):
+        return
+
+    client_id = int(query.data.split("_")[1])
+    lang = user_states.get(client_id, {}).get("lang", "es")
+
+    # Mensaje al cliente
+    await context.bot.send_message(chat_id=client_id, text=messages[lang]["completed"])
+
+    # Mensaje al grupo
+    await query.edit_message_text("✅ Venta completada y marcada como finalizada.")
+
+# Flask keep_alive
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
 def index():
-    return 'ANFHLYBOT está activo 😎'
+    return "Estoy vivo y ayudando a usuarios!"
 
-# Ejecutar bot
+def run():
+    flask_app.run(host="0.0.0.0", port=8080)
+
+def keep_alive():
+    thread = threading.Thread(target=run)
+    thread.start()
+
+# MAIN
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler('start', start_handler))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    # Handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_language, pattern="^lang_"))
+    application.add_handler(CallbackQueryHandler(handle_response, pattern="^(yes|no|contact|cancel)$"))
+    application.add_handler(CallbackQueryHandler(accept_client, pattern="^accept_"))
+    application.add_handler(CallbackQueryHandler(finalize_sale, pattern="^done_"))
 
-    print("🤖 ANFHLYBOT está funcionando...")
-    app.run_polling()
+    application.run_polling()
 
 if __name__ == '__main__':
-    from threading import Thread
-    Thread(target=lambda: app_flask.run(host="0.0.0.0", port=8080)).start()
+    keep_alive()
     main()
