@@ -1,51 +1,40 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, ConversationHandler, CallbackContext
-from keep_alive import keep_alive
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 import os
-import logging
 
-# Usa variable de entorno
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# Puedes usar una variable de entorno o directamente tu token
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "7877437431:AAFkz3Yseq7JBVTiv5783jbvquCZfbOXs7I"
 
-# ID de grupo de asesores
-CHAT_ID_GRUPO_ASESORES = -4969162959
+# Comando /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("✅ Opción 1", callback_data='opcion_1')],
+        [InlineKeyboardButton("🔁 Opción 2", callback_data='opcion_2')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("¡Hola! Soy tu bot actualizado 😄\nElige una opción:", reply_markup=reply_markup)
 
-# Estados
-PAIS, NOMBRE = range(2)
+# Manejo de botones (CallbackQuery)
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # Confirma que se recibió el clic
 
-# Seguimiento
-asignaciones = {}
-mensajes_pendientes = {}
+    if query.data == 'opcion_1':
+        await query.edit_message_text("Elegiste ✅ Opción 1")
+    elif query.data == 'opcion_2':
+        await query.edit_message_text("Elegiste 🔁 Opción 2")
+    else:
+        await query.edit_message_text("Opción no válida")
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ... (todo tu código está bien hasta aquí, no cambies nada más del flujo)
-
+# Función principal
 def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            PAIS: [CallbackQueryHandler(pais_callback)],
-            NOMBRE: [MessageHandler(Filters.text & ~Filters.command, get_nombre)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_callback))
 
-    dp.add_handler(conv_handler)
-    dp.add_handler(CallbackQueryHandler(aceptar_callback, pattern='^aceptar_'))
-    dp.add_handler(CallbackQueryHandler(finalizar_callback, pattern='^finalizar_'))
-    dp.add_handler(CommandHandler("venta", comando_venta))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, reenvio))
-
-    updater.start_polling()
-    print("🤖 Bot corriendo...")
-    updater.idle()
+    print("✅ Bot corriendo...")
+    app.run_polling()
 
 if __name__ == '__main__':
-    keep_alive()
     main()
