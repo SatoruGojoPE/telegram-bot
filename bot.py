@@ -1,16 +1,16 @@
 import os
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-ASESOR_GROUP_CHAT_ID = os.getenv("ASESOR_GROUP_CHAT_ID")  # opcional
+# Token y URL del webhook
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://telegram-bot-y7if.onrender.com{WEBHOOK_PATH}"
 
 app = Flask(__name__)
-application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Mensaje de bienvenida con opción de idioma
+# Función de inicio
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
@@ -18,130 +18,85 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("English", callback_data="lang_en")
         ]
     ]
-    await update.message.reply_text("Choose your language / Elige tu idioma:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("🌍 Please choose your language / Por favor elige tu idioma:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Elección de idioma
-async def language_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Manejo de idioma
+async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == "lang_es":
         context.user_data["lang"] = "es"
-        await query.message.reply_text(
-            f"Hola {query.from_user.first_name}, soy ANFHLYBOT 🤖 tu ayudante para activar tu premium exclusivo sin publicidad en la página o app de ANFHLY. ¿Estás interesado?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Sí, quiero", callback_data="es_yes")],
-                [InlineKeyboardButton("No, gracias", callback_data="es_no")]
-            ])
-        )
-    elif query.data == "lang_en":
+        await query.message.reply_text("Hola 👋, soy *ANFHLYBOT*, tu ayudante para activar tu cuenta *premium*. ¿Te interesa tener acceso *sin publicidad* y *contenido exclusivo*? 😎", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Sí, quiero", callback_data="premium_yes")],
+            [InlineKeyboardButton("No, gracias", callback_data="premium_no")]
+        ]))
+    else:
         context.user_data["lang"] = "en"
-        await query.message.reply_text(
-            f"Hi {query.from_user.first_name}, I’m ANFHLYBOT 🤖 your assistant to activate your premium subscription with no ads and exclusive access on ANFHLY’s app or site. Are you interested?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Yes, I want it", callback_data="en_yes")],
-                [InlineKeyboardButton("No, thanks", callback_data="en_no")]
-            ])
-        )
+        await query.message.reply_text("Hi 👋, I'm *ANFHLYBOT*, your assistant to activate your *premium account*. Interested in *ad-free* and *exclusive content*? 😎", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Yes, I'm interested", callback_data="premium_yes")],
+            [InlineKeyboardButton("No, thanks", callback_data="premium_no")]
+        ]))
 
-# Respuesta al interés
-async def interest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Confirmación premium
+async def handle_premium_interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    lang = context.user_data.get("lang", "es")
 
-    if query.data.endswith("_yes"):
-        lang = query.data.split("_")[0]
+    if query.data == "premium_yes":
         if lang == "es":
-            msg = (
-                "¡Perfecto! 🎉\n\nAl ser *premium*, disfrutarás tus películas y series favoritas *sin anuncios* por solo *9 dólares al mes* vía *PayPal*.\n\n"
-                "Para continuar, te conectaremos con un asesor que te ayudará con el pago y solicitará tu correo registrado."
+            await query.message.reply_text(
+                "¡Excelente! 😃 Ser *premium* significa que verás tus películas y series *sin publicidad* por solo *$9 al mes* vía *PayPal*.\n\nUn asesor se pondrá en contacto contigo ahora.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📞 Contactar asesor", callback_data="contact_agent")],
+                    [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")]
+                ])
             )
-            buttons = [
-                [InlineKeyboardButton("Contactar asesor", callback_data="contact_asesor")],
-                [InlineKeyboardButton("Cancelar", callback_data="cancelar")]
-            ]
         else:
-            msg = (
-                "Awesome! 🎉\n\nAs a *premium* user, enjoy your favorite movies and series *ad-free* for only *$9/month* via *PayPal*.\n\n"
-                "To proceed, we’ll connect you with a support agent to assist you with the payment and ask for your registered email."
+            await query.message.reply_text(
+                "Great! 😃 Being *premium* means ad-free movies and series for only *$9/month* via *PayPal*.\n\nAn agent will contact you now.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📞 Contact agent", callback_data="contact_agent")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
+                ])
             )
-            buttons = [
-                [InlineKeyboardButton("Contact support", callback_data="contact_asesor")],
-                [InlineKeyboardButton("Cancel", callback_data="cancelar")]
-            ]
-
-        await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
-
-    elif query.data.endswith("_no"):
-        await query.message.reply_text("Gracias por tu respuesta. Si cambias de opinión, ¡estaré aquí!")
+    elif query.data == "premium_no":
+        await query.message.reply_text("¡Está bien! Si cambias de opinión, aquí estaré 😊")
 
 # Contactar asesor
-async def contactar_asesor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def contact_agent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     user = query.from_user
+    message = f"⚠️ El usuario @{user.username} está solicitando *premium*. ¿Quién está disponible para ayudarlo?"
+    await query.message.reply_text("🔔 Contactando con un asesor... espera unos segundos por favor.")
+    await context.bot.send_message(chat_id=os.environ["GROUP_ID"], text=message, parse_mode="Markdown")
 
-    await query.message.reply_text("⏳ Te estamos conectando con un asesor...")
-
-    # Mensaje al grupo de asesores
-    if ASESOR_GROUP_CHAT_ID:
-        await context.bot.send_message(
-            chat_id=ASESOR_GROUP_CHAT_ID,
-            text=f"📢 El usuario @{user.username} (ID: {user.id}) está solicitando activar su plan premium.\n¿Quién puede ayudar?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Aceptar solicitud", callback_data=f"aceptar_{user.id}")]
-            ])
-        )
-
-# Asesor acepta solicitud
-async def aceptar_solicitud(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    _, user_id = query.data.split("_")
-    await query.message.reply_text("✅ Solicitud aceptada. Procede a contactar al usuario.")
-
-    try:
-        await context.bot.send_message(
-            chat_id=int(user_id),
-            text="Un asesor se ha conectado contigo. Vamos a continuar con el proceso de activación de tu cuenta premium. 💳"
-        )
-    except Exception as e:
-        await query.message.reply_text(f"No se pudo contactar al usuario. Error: {e}")
-
-# Cancelar conversación
-async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.message.reply_text("🚫 Operación cancelada. Si deseas activar premium más adelante, escribe /start.")
-
-# Rutas webhook
-@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    application.update_queue.put(update)
+# Webhook receptor
+@app.route(WEBHOOK_PATH, methods=["POST"])
+def webhook() -> str:
+    update = Update.de_json(request.get_json(force=True), bot.application.bot)
+    bot.application.update_queue.put(update)
     return "ok"
 
-@app.route("/")
-def home():
-    return "Bot ANFHLY corriendo"
+# Inicializar bot y registrar handlers
+bot = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Inicializar
-async def setup():
-    await application.initialize()
-    await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{BOT_TOKEN}")
-    await application.start()
-    print("✅ Webhook registrado")
+bot.add_handler(CommandHandler("start", start))
+bot.add_handler(CallbackQueryHandler(language_selection, pattern="^lang_"))
+bot.add_handler(CallbackQueryHandler(handle_premium_interest, pattern="^premium_"))
+bot.add_handler(CallbackQueryHandler(contact_agent, pattern="^contact_agent"))
+
+# Configurar webhook al iniciar
+async def set_webhook():
+    await bot.bot.set_webhook(WEBHOOK_URL)
+
+import asyncio
+asyncio.run(set_webhook())
 
 if __name__ == "__main__":
-    import asyncio
-    # Handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(language_choice, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(interest_response, pattern="^(es|en)_(yes|no)$"))
-    application.add_handler(CallbackQueryHandler(contactar_asesor, pattern="^contact_asesor$"))
-    application.add_handler(CallbackQueryHandler(aceptar_solicitud, pattern="^aceptar_"))
-    application.add_handler(CallbackQueryHandler(cancelar, pattern="^cancelar$"))
-
-    asyncio.run(setup())
-    app.run(host="0.0.0.0", port=8080)
+    bot.run_webhook(listen="0.0.0.0", port=8080, webhook_path=WEBHOOK_PATH, web_app=app)
